@@ -24,7 +24,7 @@ function App() {
         setUploading(true);
 
         try {
-            const response = await axios.post('https://pdf-splitter-kabacinski.azurewebsites.net/api/upload', formData, {
+            const response = await axios.post('https://localhost:7110/api/upload', formData, {
                 responseType: 'blob',
             });
 
