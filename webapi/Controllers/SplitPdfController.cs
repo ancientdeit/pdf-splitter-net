@@ -30,8 +30,7 @@ namespace PdfSplitter.Controllers
             memoryStream.Close();
             Bitmap result = new Bitmap(original.Width, original.Height, PixelFormat.Format8bppIndexed);
 
-            BitmapData data = result.LockBits(new System.Drawing.Rectangle(0, 0, result.Width, result.Height),
-                ImageLockMode.WriteOnly, PixelFormat.Format8bppIndexed);
+            BitmapData data = result.LockBits(new System.Drawing.Rectangle(0, 0, result.Width, result.Height), ImageLockMode.WriteOnly, PixelFormat.Format8bppIndexed);
             byte[] bytes = new byte[data.Height * data.Stride];
             Marshal.Copy(data.Scan0, bytes, 0, bytes.Length);
 
@@ -53,11 +52,6 @@ namespace PdfSplitter.Controllers
             {
                 result.Save(stream, ImageFormat.Png);
 
-                /* As discussed above, we want this image to have /DeviceGray colorspace and we have already
-                 * ensured that image pixel values are defined correctly for this color space on low level
-                 * (by taking average values of red, green and blue components). So, we explicitly override
-                 * color space directly in the created image PDF object.
-                 */
                 ImageData imageData = ImageDataFactory.Create(stream.ToArray());
                 PdfImageXObject imageXObject = new PdfImageXObject(imageData);
                 PdfStream imageXObjectStream = imageXObject.GetPdfObject();
@@ -66,10 +60,6 @@ namespace PdfSplitter.Controllers
                 // Remove a redundant submask
                 imageXObjectStream.Remove(PdfName.Mask);
 
-                /* In C# an alpha channel (transparency) is automatically added, however we know that original
-                 * image didn't have transparency, that's why we just explicitly throw away any transparency
-                 * defined for the PDF object that represents an image.
-                 */
                 return new Image(imageXObject);
             }
         }
