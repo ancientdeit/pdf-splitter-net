@@ -13,7 +13,7 @@ builder.Services.AddCors(options =>
         builder =>
         {
             builder
-                .WithOrigins("https://localhost:3000", "http://tools.kabacinski.it", "https://tools.kabacinski.it") // added the second URL here
+                .WithOrigins("http://tools.kabacinski.it", "https://tools.kabacinski.it")
                 .AllowAnyMethod()
                 .AllowAnyHeader();
         });
@@ -32,12 +32,13 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
-
 app.UseCors("AllowReactApp");
+
+app.UseHttpsRedirection();
 
 app.UseAuthorization();
 
 app.MapControllers();
 
 app.Run();
+

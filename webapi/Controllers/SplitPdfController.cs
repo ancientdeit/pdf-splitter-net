@@ -1,6 +1,5 @@
 ﻿using System.IO;
-using iTextSharp.text;
-using iTextSharp.text.pdf;
+using iText.Kernel.Pdf;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using ICSharpCode.SharpZipLib.Zip;
@@ -27,50 +26,45 @@ namespace PdfSplitter.Controllers
 
                 using (var pdfReader = new PdfReader(stream))
                 {
-                    using (var memoryStream = new MemoryStream())
+                    using (var pdfDocument = new PdfDocument(pdfReader))
                     {
-                        using (var zipOutputStream = new ZipOutputStream(memoryStream))
+                        using (var memoryStream = new MemoryStream())
                         {
-                            for (int i = 1; i <= pdfReader.NumberOfPages; i++)
+                            using (var zipOutputStream = new ZipOutputStream(memoryStream))
                             {
-                                using (var pageStream = new MemoryStream())
+                                for (int i = 1; i <= pdfDocument.GetNumberOfPages(); i++)
                                 {
-                                    var document = new Document(pdfReader.GetPageSizeWithRotation(i));
-                                    var pdfCopy = new PdfCopy(document, pageStream);
-                                    document.Open();
-
-                                    var page = pdfCopy.GetImportedPage(pdfReader, i);
-                                    pdfCopy.AddPage(page);
-
-                                    document.Close();
-
-                                    // Compress the page before writing it to the zip file
-                                    using (var compressedPageStream = new MemoryStream())
+                                    using (var pageStream = new MemoryStream())
                                     {
-                                        var reader = new PdfReader(pageStream.ToArray());
-                                        using (var stamper = new PdfStamper(reader, compressedPageStream))
+                                        var writerProperties = new WriterProperties();
+                                        writerProperties.SetPdfVersion(PdfVersion.PDF_2_0);
+                                        writerProperties.SetCompressionLevel(CompressionConstants.BEST_COMPRESSION);
+
+                                        using (var writer = new PdfWriter(pageStream, writerProperties))
                                         {
-                                            stamper.Writer.SetFullCompression();
-                                            stamper.Writer.CompressionLevel = PdfStream.BEST_COMPRESSION;
+                                            using (var pdfCopy = new PdfDocument(writer))
+                                            {
+                                                pdfDocument.CopyPagesTo(i, i, pdfCopy);
+                                            }
                                         }
 
-                                        var compressedPageBytes = compressedPageStream.ToArray();
+                                        var pageBytes = pageStream.ToArray();
 
-                                        // Write the compressed page to the zip file
+                                        // Write the page to the zip file
                                         var entry = new ZipEntry($"{inputFileName}-page-{i}.pdf");
                                         zipOutputStream.PutNextEntry(entry);
-                                        zipOutputStream.Write(compressedPageBytes, 0, compressedPageBytes.Length);
+                                        zipOutputStream.Write(pageBytes, 0, pageBytes.Length);
                                         zipOutputStream.CloseEntry();
                                     }
                                 }
+
+                                zipOutputStream.Finish();
+                                zipOutputStream.Close();
                             }
 
-                            zipOutputStream.Finish();
-                            zipOutputStream.Close();
+                            var resultBytes = memoryStream.ToArray();
+                            return File(resultBytes, "application/zip", $"{inputFileName}.zip");
                         }
-
-                        var resultBytes = memoryStream.ToArray();
-                        return File(resultBytes, "application/zip", $"{inputFileName}.zip");
                     }
                 }
             }
