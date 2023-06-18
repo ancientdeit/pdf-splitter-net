@@ -8,11 +8,15 @@ using System.Drawing.Imaging;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using PdfiumViewer;
+using iText.Layout;
+using iText.Layout.Element;
+
 using PdfDictionary = iText.Kernel.Pdf.PdfDictionary;
 using PdfName = iText.Kernel.Pdf.PdfName;
 using PdfStream = iText.Kernel.Pdf.PdfStream;
 using PdfDocument = iText.Kernel.Pdf.PdfDocument;
 using PdfReader = iText.Kernel.Pdf.PdfReader;
+using System.Globalization;
 
 namespace PdfSplitter.Controllers
 {
@@ -21,23 +25,6 @@ namespace PdfSplitter.Controllers
     {
         private static Image ConvertToBlackAndWhitePng(PdfImageXObject image)
         {
-
-            /* We want to convert image to grayscale. In PDF this corresponds
-             * to DeviceGray color space. Images in DeviceGray colorspace shall have
-             * only 8 bits per pixel (bpp).
-             * In C# 8bpp images are not well supported, therefore we would need to perform
-             * some tricks on a low level in order to convert RGB 24bpp image to 8 bit image.
-             *
-             * We will manually set image pixel 8 bit values according to original image
-             * RGB pixel values. We know from PDF specification, that DeviceGray color space
-             * treats each pixel as the value from 0 to 255 and we know that taking an average
-             * of RGB values is a very basic but working approach to get corresponding grayscale
-             * value.
-             * Note that due to C# restrictions we create image with indexed colorspace
-             * (Format8bppIndexed). For now we don't care what are the actual colors in color
-             * palette, because we already define pixle values as if they were in grayscale
-             * color space. We will explicitly overide color space directly in PDF object later.
-             */
             MemoryStream memoryStream = new MemoryStream(image.GetImageBytes());
             Bitmap original = new Bitmap(memoryStream);
             memoryStream.Close();
@@ -103,55 +90,15 @@ namespace PdfSplitter.Controllers
             return resizedImage;
         }
 
-        public static void CompressImagesOnPdf(PdfDocument input)
+        public static System.Drawing.Image ConvertPdfPageToImage(byte[] pdfBytes, int pageNumber, float dpi)
         {
-            // Assume that there is a single XObject in the source document
-            // and this single object is an image.
-            PdfDictionary pageDict = input.GetFirstPage().GetPdfObject();
-            PdfDictionary resources = pageDict.GetAsDictionary(PdfName.Resources);
-            PdfDictionary xObjects = resources.GetAsDictionary(PdfName.XObject);
-
-            if (xObjects == null || xObjects.Size() == 0)
+            using (var pdfStream = new MemoryStream(pdfBytes))
             {
-                return;
-            }
-
-            PdfName imgRef = xObjects.KeySet().First();
-            PdfStream pdfStream = xObjects.GetAsStream(imgRef);
-            PdfImageXObject imageXObject = new PdfImageXObject(pdfStream);
-
-            using (MemoryStream memoryStreamImage = new MemoryStream(imageXObject.GetImageBytes()))
-            {
-                Bitmap bitmap = new Bitmap(memoryStreamImage);
-
-                // Resize the image
-                int newWidth = bitmap.Width / 2;  // or whatever width you want
-                int newHeight = bitmap.Height / 2;  // or whatever height you want
-                Bitmap resizedBitmap = ResizeImage(bitmap, newWidth, newHeight);
-
-                // Compress the image and save it to a MemoryStream
-                using (MemoryStream compressedStream = new MemoryStream())
+                pdfStream.Position = 0;
+                using (var document = PdfiumViewer.PdfDocument.Load(pdfStream))
                 {
-                    ImageCodecInfo codecInfo = GetEncoderInfo("image/jpeg");
-                    EncoderParameters encoderParameters = new EncoderParameters(1);
-                    Encoder myEncoder = Encoder.Quality;
-                    encoderParameters.Param[0] = new EncoderParameter(myEncoder, 10L);
-                    resizedBitmap.Save(compressedStream, codecInfo, encoderParameters);
-
-                    // Replace the image in the PDF
-                    ImageData compressedImageData = ImageDataFactory.Create(compressedStream.ToArray());
-                    PdfImageXObject compressedImageXObject = new PdfImageXObject(compressedImageData);
-                    xObjects.Put(imgRef, compressedImageXObject.GetPdfObject());
+                    return document.Render(pageNumber - 1, dpi, dpi, true);
                 }
-            }
-        }
-
-        public static System.Drawing.Image ConvertPdfPageToImage(Stream pdfStream, int pageNumber)
-        {
-            pdfStream.Position = 0;
-            using (var document = PdfiumViewer.PdfDocument.Load(pdfStream))
-            {
-                return document.Render(pageNumber, 300, 300, true);
             }
         }
 
@@ -168,10 +115,71 @@ namespace PdfSplitter.Controllers
             return null;
         }
 
+        public static void CompressAndConvertImageToPdf(System.Drawing.Image image, PdfWriter writer, float scale)
+        {
+            // Resize the image
+            var bitmap = new Bitmap(image);
+            int newWidth = (int)(bitmap.Width * scale);  // or whatever width you want
+            int newHeight = (int)(bitmap.Height * scale);  // or whatever height you want
+            Bitmap resizedBitmap = ResizeImage(bitmap, newWidth, newHeight);
+
+            // Convert Bitmap to byte array
+            ImageConverter converter = new ImageConverter();
+            byte[] imageBytes = (byte[])converter.ConvertTo(resizedBitmap, typeof(byte[]));
+
+            // Create a PDF document
+            using (var pdfDocument = new PdfDocument(writer))
+            {
+                var document = new Document(pdfDocument);
+
+                // Create an ImageData object
+                var imageData = ImageDataFactory.Create(imageBytes);
+
+                // Create an Image object and add it to the document
+                var pdfImg = new Image(imageData);
+                document.Add(pdfImg);
+
+                document.Close();
+            }
+        }
 
         [HttpPost]
-        public IActionResult Upload(IFormFile file)
+        public IActionResult Upload(IFormFile file, [FromForm] string scale, [FromForm] string compression, [FromForm] string dpi)
         {
+            float scaleValue;
+            float dpiValue;
+            int compressionValue;
+
+            if (float.TryParse(scale, NumberStyles.Float, CultureInfo.InvariantCulture, out scaleValue))
+            {
+                // The string was successfully converted to a float, you can now use `scaleValue` in your code
+            }
+            else
+            {
+                // The string could not be converted to a float, you might want to return an error response
+                return BadRequest("Invalid scale value provided");
+            }
+
+            if (int.TryParse(compression, NumberStyles.Integer, CultureInfo.InvariantCulture, out compressionValue))
+            {
+                // The string was successfully converted to a integer, you can now use `compressionValue` in your code
+            }
+            else
+            {
+                // The string could not be converted to a integer, you might want to return an error response
+                return BadRequest("Invalid compression value provided");
+            }
+
+            if (float.TryParse(dpi, NumberStyles.Float, CultureInfo.InvariantCulture, out dpiValue))
+            {
+                // The string was successfully converted to a float, you can now use `compressionValue` in your code
+            }
+            else
+            {
+                // The string could not be converted to a float, you might want to return an error response
+                return BadRequest("Invalid compression value provided");
+            }
+
             if (file == null || file.Length == 0)
             {
                 return BadRequest("No file uploaded.");
@@ -179,53 +187,52 @@ namespace PdfSplitter.Controllers
 
             string inputFileName = Path.GetFileNameWithoutExtension(file.FileName);
 
-            using (var stream = new MemoryStream())
+            using (var memoryStream = new MemoryStream())
             {
-                file.CopyTo(stream);
-                stream.Position = 0;
+                file.CopyTo(memoryStream);
+                memoryStream.Position = 0;
 
-                using (var pdfReader = new PdfReader(stream))
+                var pdfBytes = memoryStream.ToArray();
+
+                using (var pdfReader = new PdfReader(new MemoryStream(pdfBytes)))
                 {
                     using (var pdfDocument = new PdfDocument(pdfReader))
                     {
-                        using (var memoryStream = new MemoryStream())
+                        using (var zipStream = new MemoryStream())
                         {
-                            using (var zipOutputStream = new ZipOutputStream(memoryStream))
+                            using (var zipOutputStream = new ZipOutputStream(zipStream))
                             {
                                 for (int i = 1; i <= pdfDocument.GetNumberOfPages(); i++)
                                 {
+                                    var image = ConvertPdfPageToImage(pdfBytes, i, dpiValue);
+
                                     using (var pageStream = new MemoryStream())
                                     {
                                         var writerProperties = new WriterProperties();
                                         writerProperties.SetPdfVersion(PdfVersion.PDF_2_0);
-                                        writerProperties.SetCompressionLevel(CompressionConstants.BEST_COMPRESSION);
+                                        writerProperties.SetCompressionLevel(compressionValue);
 
                                         using (var writer = new iText.Kernel.Pdf.PdfWriter(pageStream, writerProperties))
                                         {
-                                            using (var pdfCopy = new PdfDocument(writer))
-                                            {
-                                                pdfDocument.CopyPagesTo(i, i, pdfCopy);
-                                                CompressImagesOnPdf(pdfCopy);
-                                                pdfCopy.Close();
-                                            }
+                                            CompressAndConvertImageToPdf(image, writer, scaleValue);
                                         }
 
-                                        var pageBytes = pageStream.ToArray();
+                                        var compressedPageBytes = pageStream.ToArray();
 
                                         // Write the page to the zip file
                                         var entry = new ZipEntry($"{inputFileName}-page-{i}.pdf");
                                         zipOutputStream.PutNextEntry(entry);
-                                        zipOutputStream.Write(pageBytes, 0, pageBytes.Length);
+                                        zipOutputStream.Write(compressedPageBytes, 0, compressedPageBytes.Length);
                                         zipOutputStream.CloseEntry();
                                     }
                                 }
 
                                 zipOutputStream.Finish();
                                 zipOutputStream.Close();
-                            }
 
-                            var resultBytes = memoryStream.ToArray();
-                            return File(resultBytes, "application/zip", $"{inputFileName}.zip");
+                                var resultBytes = zipStream.ToArray();
+                                return File(resultBytes, "application/zip", $"{inputFileName}.zip");
+                            }
                         }
                     }
                 }

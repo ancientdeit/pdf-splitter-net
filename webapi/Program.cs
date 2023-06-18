@@ -13,7 +13,7 @@ builder.Services.AddCors(options =>
         builder =>
         {
             builder
-                .WithOrigins("https://localhost:3000", "http://tools.kabacinski.it", "https://tools.kabacinski.it")
+                .WithOrigins("http://tools.kabacinski.it", "https://tools.kabacinski.it")
                 .AllowAnyMethod()
                 .AllowAnyHeader();
         });
